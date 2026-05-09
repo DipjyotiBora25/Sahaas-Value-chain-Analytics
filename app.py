@@ -130,7 +130,7 @@ def summary_table(df: pd.DataFrame, title: str, n=5):
     st.dataframe(df.head(n), use_container_width=True)
 
 
-def aggregate_top(df: pd.DataFrame, group_col: str, value_col: str, top_n=8) -> pd.DataFrame:
+def aggregate_top(df: pd.DataFrame, group_col: str, value_col: str, top_n=10) -> pd.DataFrame:
     if group_col not in df.columns or value_col not in df.columns:
         return pd.DataFrame()
     agg = df.groupby(group_col, dropna=False)[value_col].sum().reset_index()
@@ -433,7 +433,7 @@ def main():
             st.markdown("<div class='brand-title'>Sahaas Zero Waste Analytics</div>", unsafe_allow_html=True)
             st.markdown("<div class='brand-subtitle'>Interactive dashboard for sales, procurement and profit alignment across the zero-waste value chain.</div>", unsafe_allow_html=True)
         with col2:
-            st.markdown("<div class='meta-chip'>Reporting Period: FY 2025–26</div>", unsafe_allow_html=True)
+            st.markdown("<div class='meta-chip'>Reporting Period: FY 2026–27</div>", unsafe_allow_html=True)
             st.markdown("<div class='meta-chip'>Built for Sahaas Zero Waste Company</div>", unsafe_allow_html=True)
 
     with st.container():
