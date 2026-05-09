@@ -1,3 +1,5 @@
+
+
 import difflib
 from pathlib import Path
 
@@ -5,14 +7,16 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+st.set_page_config(page_title="Sahaas Zero Waste Analytics", page_icon="♻️", layout="wide")
+
+
+# Import dashboard modules
+from sales_dashboard import render_revenue_insights
+from purchase_dashboard import render_spend_analysis
+
 ROOT = Path(__file__).resolve().parent
 LOGO_FILE = ROOT / "SZW_Logo.png"
-SALES_FILE = ROOT / "working_sales_req_column.xlsx"
-SALES_SAMPLE = ROOT / "working_sales_req_column_sample.csv"
-PURCHASE_FILE = ROOT / "purchase_data_cleaned.xlsx"
-PURCHASE_ALT = ROOT / "Purchase" / "Purchase Data_Final .csv"
 
-st.set_page_config(page_title="Sahaas Zero Waste Analytics", page_icon="♻️", layout="wide")
 
 
 def app_styles():
@@ -91,12 +95,6 @@ def normalize_purchase(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_data_from_path(path: Path) -> pd.DataFrame:
-    if not path.exists():
-        return pd.DataFrame()
-    return read_tabular(path)
-
-
 def safe_sales_amount_column(df: pd.DataFrame) -> str | None:
     if "Item Total" in df.columns:
         return "Item Total"
@@ -153,6 +151,28 @@ def cut_chart(df: pd.DataFrame, breakdown_col: str, value_col: str, title: str):
     if chart_df.empty:
         return None
     return px.bar(chart_df, x=value_col, y=breakdown_col, orientation='h', title=title, text=value_col).update_layout(yaxis={'categoryorder':'total ascending'})
+
+
+def get_insight_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    for col in candidates:
+        if col in df.columns:
+            return col
+    return None
+
+
+def get_filter_values(df: pd.DataFrame, col: str) -> list:
+    if col not in df.columns:
+        return []
+    values = df[col].dropna().unique().tolist()
+    return sorted(values, key=lambda v: str(v))
+
+
+def apply_insight_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
+    result = df.copy()
+    for col, selected in filters.items():
+        if selected and col in result.columns:
+            result = result[result[col].isin(selected)]
+    return result
 
 
 def match_items(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -> pd.DataFrame:
@@ -401,54 +421,6 @@ def render_purchase(purchase_df: pd.DataFrame):
             st.plotly_chart(fig, use_container_width=True)
 
 
-def render_stitch(sales_df: pd.DataFrame, purchase_df: pd.DataFrame):
-    if sales_df.empty or purchase_df.empty:
-        st.warning("Upload both sales and purchase data to see the combined Stitch view.")
-        return
-    sales_amount_col = safe_sales_amount_column(sales_df)
-    purchase_amount_col = safe_purchase_amount_column(purchase_df)
-    if sales_amount_col:
-        sales_df[sales_amount_col] = pd.to_numeric(sales_df[sales_amount_col], errors='coerce').fillna(0)
-    if purchase_amount_col:
-        purchase_df[purchase_amount_col] = pd.to_numeric(purchase_df[purchase_amount_col], errors='coerce').fillna(0)
-
-    total_sales = sales_df[sales_amount_col].sum() if sales_amount_col else 0
-    total_purchase = purchase_df[purchase_amount_col].sum() if purchase_amount_col else 0
-    profit = total_sales - total_purchase
-    margin = (profit / total_sales * 100) if total_sales else 0
-
-    st.markdown("<div class='tab-guide'><span class='tab-pill active'>Stitch</span></div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>Profit and alignment view</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-copy'>This view stitches sales and procurement together to surface profit margins, category alignment, and item matching performance. It helps prioritize operational fixes and procurement-sell coordination.</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="metric-row">', unsafe_allow_html=True)
-    metric_card("Revenue", f"₹{total_sales:,.0f}", "+12%", positive=True)
-    metric_card("Purchase Spend", f"₹{total_purchase:,.0f}", "+9%", positive=False)
-    metric_card("Profit", f"₹{profit:,.0f}", f"{margin:.1f}% margin", positive=profit >= 0)
-    metric_card("Alignment score", "72%", "+4 pts", positive=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    chart_data = pd.DataFrame({
-        "Type": ["Revenue", "Spend", "Profit"],
-        "Amount": [total_sales, total_purchase, profit],
-    })
-    fig = px.bar(chart_data, x="Type", y="Amount", title="Revenue vs Spend vs Profit", color="Type", color_discrete_map={"Revenue":"#0f766e","Spend":"#b91c1c","Profit":"#2563eb"})
-    fig.update_layout(showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
-
-    matched = match_items(sales_df, purchase_df)
-    if not matched.empty:
-        missing = matched[matched["Matched Purchase Item"] == ""]
-        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>Item alignment risks</div>", unsafe_allow_html=True)
-        st.markdown("<div class='section-copy'>These sales items could not be auto-matched to purchase items. Review naming and category mapping to improve operational stitching.</div>", unsafe_allow_html=True)
-        if not missing.empty:
-            st.dataframe(missing.head(8), use_container_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-
-
 def main():
     app_styles()
     st.markdown('<div class="page-shell">', unsafe_allow_html=True)
@@ -477,19 +449,15 @@ def main():
         sales_df = read_tabular(sales_file)
         sales_source = sales_file.name
     else:
-        sales_df = load_data_from_path(SALES_FILE)
-        if sales_df.empty and SALES_SAMPLE.exists():
-            sales_df = load_data_from_path(SALES_SAMPLE)
-        sales_source = SALES_FILE.name if not sales_df.empty else "No sales file found"
+        sales_df = pd.DataFrame()
+        sales_source = "No sales file uploaded"
 
     if purchase_file is not None:
         purchase_df = read_tabular(purchase_file)
         purchase_source = purchase_file.name
     else:
-        purchase_df = load_data_from_path(PURCHASE_FILE)
-        if purchase_df.empty and PURCHASE_ALT.exists():
-            purchase_df = load_data_from_path(PURCHASE_ALT)
-        purchase_source = PURCHASE_FILE.name if not purchase_df.empty else "No purchase file found"
+        purchase_df = pd.DataFrame()
+        purchase_source = "No purchase file uploaded"
 
     sales_df = normalize_sales(sales_df)
     purchase_df = normalize_purchase(purchase_df)
@@ -497,7 +465,7 @@ def main():
     st.markdown(f"<div class='small-caption'>Sales source: {sales_source} • Purchase source: {purchase_source}</div>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
-    tabs = st.tabs(["Overview", "Sales", "Purchase", "Stitch"])
+    tabs = st.tabs(["Overview", "Sales", "Purchase", "Revenue Insights", "Spend Analysis"])
     with tabs[0]:
         render_overview(sales_df, purchase_df)
     with tabs[1]:
@@ -505,7 +473,9 @@ def main():
     with tabs[2]:
         render_purchase(purchase_df)
     with tabs[3]:
-        render_stitch(sales_df, purchase_df)
+        render_revenue_insights(sales_df)
+    with tabs[4]:
+        render_spend_analysis(purchase_df)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
