@@ -9,13 +9,9 @@ This Streamlit app provides a four-tab dashboard for sales, purchase, data editi
 
 ## Data sources
 - Sales data is loaded from Desktop `Working_sales Sahaas`:
-  - `working_sales_req_column.xlsx` (raw source)
-  - `working_sales_req_column_sample.csv` (sample fallback)
-  - `working_sales_req_column_imputed.xlsx` (fallback)
+
 - Purchase data is loaded from Desktop `Working_Purchase Sahaas`:
-  - `Purchase Data_Final .csv` (raw source)
-  - `purchase_data_sample.csv` (sample fallback)
-  - `purchase_data_cleaned.csv` (fallback)
+  
 
 ## Run the app
 
