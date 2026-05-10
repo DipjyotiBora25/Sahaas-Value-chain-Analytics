@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title="Sahaas Zero Waste Analytics", page_icon="♻️", layout="wide")
+st.set_page_config(page_title="Saahas Zero Waste Analytics", page_icon="♻️", layout="wide")
 
 
 # Import dashboard modules
@@ -219,7 +219,7 @@ def render_overview(sales_df: pd.DataFrame, purchase_df: pd.DataFrame):
 
     st.markdown("<div class='tab-guide'><span class='tab-pill active'>Overview</span></div>", unsafe_allow_html=True)
     st.markdown("<div class='section-title'>Executive summary</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-copy'>This overview brings together sales and purchase performance for Sahaas Zero Waste. It highlights revenue, spend, profit, and high-impact categories across sales, procurement, and zero-waste operational flows.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-copy'>This overview brings together sales and purchase performance for Saahas Zero Waste. It highlights revenue, spend, profit, and high-impact categories across sales, procurement, and zero-waste operational flows.</div>", unsafe_allow_html=True)
     
 
     st.markdown('<div class="metric-row">', unsafe_allow_html=True)
@@ -430,11 +430,11 @@ def main():
         with col1:
             if LOGO_FILE.exists():
                 st.image(str(LOGO_FILE), width=72)
-            st.markdown("<div class='brand-title'>Sahaas Zero Waste Analytics</div>", unsafe_allow_html=True)
+            st.markdown("<div class='brand-title'>Saahas Zero Waste Analytics</div>", unsafe_allow_html=True)
             st.markdown("<div class='brand-subtitle'>Interactive dashboard for sales, procurement and profit alignment across the zero-waste value chain.</div>", unsafe_allow_html=True)
         with col2:
             st.markdown("<div class='meta-chip'>Reporting Period: FY 2026–27</div>", unsafe_allow_html=True)
-            st.markdown("<div class='meta-chip'>Built for Sahaas Zero Waste Company</div>", unsafe_allow_html=True)
+            st.markdown("<div class='meta-chip'>Built for Saahas Zero Waste Company</div>", unsafe_allow_html=True)
 
     with st.container():
         st.markdown('<div class="upload-card">', unsafe_allow_html=True)
