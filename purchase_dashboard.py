@@ -8,12 +8,8 @@ import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
-import numpy as np
 
-# Custom CSS for better styling
-st.markdown("""
+_CUSTOM_CSS = """
 <style>
     .main-header {
         font-size: 2.5rem;
@@ -39,9 +35,9 @@ st.markdown("""
         margin-top: 1rem;
     }
 </style>
-""", unsafe_allow_html=True)
+"""
 
-@st.cache_data
+
 def load_data(df=None):
     """Load and preprocess the purchase data."""
     if df is not None and not df.empty:
@@ -72,7 +68,8 @@ def load_data(df=None):
 
 
 def get_logo_path():
-    """Find a usable dashboard logo image path."""
+    """Find a usable dashboard logo image path (resolved relative to this module)."""
+    here = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         'saahas_zero_waste_logo.png',
         'SZW_Logo.png',
@@ -80,8 +77,9 @@ def get_logo_path():
         'logo.png',
     ]
     for name in candidates:
-        if os.path.exists(name):
-            return name
+        path = os.path.join(here, name)
+        if os.path.exists(path):
+            return path
     return None
 
 
@@ -95,13 +93,23 @@ def get_role_filters(role):
         return ['Year', 'Month', 'Quarter', 'Business Vertical', 'Division', 'City', 'Vendor Name', 'Category', 'Item Name']
     return []
 
+
+def resolve_amount_column(df):
+    """Return the spend-amount column name regardless of exact label variant."""
+    for candidate in ['Total Amount', 'Sum of Total Amount', 'Sum of Total Amount ']:
+        if candidate in df.columns:
+            return candidate
+    return None
+
+
 def calculate_metrics(df, role):
     """Calculate key metrics based on role."""
     metrics = {}
 
-    if 'Total Amount' in df.columns:
-        metrics['Total Purchase Spend'] = df['Total Amount'].sum()
-        metrics['Average Order Value'] = df['Total Amount'].mean()
+    amount_col = resolve_amount_column(df)
+    if amount_col:
+        metrics['Total Purchase Spend'] = df[amount_col].sum()
+        metrics['Average Order Value'] = df[amount_col].mean()
         metrics['Total Transactions'] = len(df)
 
     if role in ["Country/Site Lead", "Team/Division Lead"]:
@@ -120,47 +128,49 @@ def create_charts(df, role):
     """Create charts based on role."""
     charts = {}
 
+    amount_col = resolve_amount_column(df)
+    if amount_col is None:
+        return charts
+
     # Purchase Trend
-    if 'Invoice Date' in df.columns and 'Total Amount' in df.columns:
+    if 'Invoice Date' in df.columns:
         if role == "Leadership":
-            # Monthly trend
-            monthly_spend = df.groupby('YearMonth')['Total Amount'].sum().reset_index()
-            fig_trend = px.line(monthly_spend, x='YearMonth', y='Total Amount',
+            monthly_spend = df.groupby('YearMonth')[amount_col].sum().reset_index()
+            fig_trend = px.line(monthly_spend, x='YearMonth', y=amount_col,
                               title='Monthly Purchase Spend Trend', markers=True)
         else:
-            # Daily trend for more detailed roles
-            daily_spend = df.groupby('Invoice Date')['Total Amount'].sum().reset_index()
-            fig_trend = px.line(daily_spend, x='Invoice Date', y='Total Amount',
+            daily_spend = df.groupby('Invoice Date')[amount_col].sum().reset_index()
+            fig_trend = px.line(daily_spend, x='Invoice Date', y=amount_col,
                               title='Daily Purchase Spend Trend', markers=True)
         charts['Purchase Trend'] = fig_trend
 
     # Business Vertical Distribution
-    if 'Business Vertical' in df.columns and 'Total Amount' in df.columns:
-        bv_spend = df.groupby('Business Vertical')['Total Amount'].sum().reset_index()
-        fig_bv = px.pie(bv_spend, values='Total Amount', names='Business Vertical',
+    if 'Business Vertical' in df.columns:
+        bv_spend = df.groupby('Business Vertical')[amount_col].sum().reset_index()
+        fig_bv = px.pie(bv_spend, values=amount_col, names='Business Vertical',
                        title='Spend by Business Vertical')
         charts['Business Vertical Distribution'] = fig_bv
 
     # Top Vendors (for Country/Site and Team leads)
     if role in ["Country/Site Lead", "Team/Division Lead"] and 'Vendor Name' in df.columns:
-        top_vendors = df.groupby('Vendor Name')['Total Amount'].sum().nlargest(10).reset_index()
-        fig_vendors = px.bar(top_vendors, x='Vendor Name', y='Total Amount',
+        top_vendors = df.groupby('Vendor Name')[amount_col].sum().nlargest(10).reset_index()
+        fig_vendors = px.bar(top_vendors, x='Vendor Name', y=amount_col,
                             title='Top 10 Vendors by Spend')
         fig_vendors.update_xaxes(tickangle=45)
         charts['Top Vendors'] = fig_vendors
 
     # Invoice Status Distribution (for Team leads)
     if role == "Team/Division Lead" and 'Invoice Status' in df.columns:
-        status_dist = df.groupby('Invoice Status')['Total Amount'].sum().reset_index()
-        fig_status = px.bar(status_dist, x='Invoice Status', y='Total Amount',
+        status_dist = df.groupby('Invoice Status')[amount_col].sum().reset_index()
+        fig_status = px.bar(status_dist, x='Invoice Status', y=amount_col,
                            title='Spend by Invoice Status')
         fig_status.update_xaxes(tickangle=45)
         charts['Invoice Status'] = fig_status
 
     # Category Performance (for Team leads)
     if role == "Team/Division Lead" and 'Category' in df.columns:
-        top_categories = df.groupby('Category')['Total Amount'].sum().nlargest(10).reset_index()
-        fig_categories = px.bar(top_categories, x='Category', y='Total Amount',
+        top_categories = df.groupby('Category')[amount_col].sum().nlargest(10).reset_index()
+        fig_categories = px.bar(top_categories, x='Category', y=amount_col,
                               title='Top 10 Categories by Spend')
         fig_categories.update_xaxes(tickangle=45)
         charts['Top Categories'] = fig_categories
@@ -168,6 +178,7 @@ def create_charts(df, role):
     return charts
 
 def main(df=None):
+    st.markdown(_CUSTOM_CSS, unsafe_allow_html=True)
     # Load data
     data_df = load_data(df)
     if data_df.empty:

@@ -16,6 +16,47 @@ from purchase_dashboard import render_spend_analysis
 
 ROOT = Path(__file__).resolve().parent
 LOGO_FILE = ROOT / "SZW_Logo.png"
+CATEGORY_MAP_FILE = ROOT / "Item_Cat_Update.csv"
+
+
+@st.cache_data
+def load_category_map() -> pd.DataFrame:
+    """Load the Item Name -> Category mapping. Returns a df with columns
+    ['Item Name Key', 'Category'] where the key is lowercased+stripped."""
+    if not CATEGORY_MAP_FILE.exists():
+        return pd.DataFrame(columns=["Item Name Key", "Category"])
+    df = pd.read_csv(CATEGORY_MAP_FILE, encoding="utf-8-sig")
+    if "Delete" in df.columns:
+        df = df[df["Delete"].fillna("").astype(str).str.strip().str.lower() != "remove"]
+    df = df.dropna(subset=["Item Name", "Category"])
+    df["Item Name Key"] = df["Item Name"].astype(str).str.strip().str.lower()
+    df["Category"] = df["Category"].astype(str).str.strip()
+    df = df[df["Item Name Key"] != ""]
+    df = df.drop_duplicates(subset=["Item Name Key"], keep="first")
+    return df[["Item Name Key", "Category"]].reset_index(drop=True)
+
+
+def attach_category(df: pd.DataFrame, category_map: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy of df with a 'Category' column populated via the mapping.
+    Existing non-null Category values are preserved; missing rows get 'Uncategorized'."""
+    if df.empty or "Item Name" not in df.columns:
+        return df.copy() if not df.empty else df
+    out = df.copy()
+    if category_map.empty:
+        if "Category" not in out.columns:
+            out["Category"] = "Uncategorized"
+        else:
+            out["Category"] = out["Category"].fillna("Uncategorized")
+        return out
+    key = out["Item Name"].astype(str).str.strip().str.lower()
+    lookup = dict(zip(category_map["Item Name Key"], category_map["Category"]))
+    mapped = key.map(lookup)
+    if "Category" in out.columns:
+        out["Category"] = out["Category"].where(out["Category"].notna() & (out["Category"].astype(str).str.strip() != ""), mapped)
+    else:
+        out["Category"] = mapped
+    out["Category"] = out["Category"].fillna("Uncategorized")
+    return out
 
 
 
@@ -282,6 +323,130 @@ def render_overview(sales_df: pd.DataFrame, purchase_df: pd.DataFrame):
                 fig.update_layout(yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig, use_container_width=True)
 
+    render_category_comparison(sales_df, purchase_df, sales_amount_col, purchase_amount_col)
+
+
+def render_category_comparison(sales_df: pd.DataFrame, purchase_df: pd.DataFrame, sales_amount_col, purchase_amount_col):
+    """Bottom-of-overview section: % revenue and % spend by category, with a
+    multi-select to compare a chosen subset of categories side-by-side."""
+    category_map = load_category_map()
+
+    sales_with_cat = attach_category(sales_df, category_map) if not sales_df.empty else sales_df
+    purchase_with_cat = attach_category(purchase_df, category_map) if not purchase_df.empty else purchase_df
+
+    has_sales = (not sales_with_cat.empty) and sales_amount_col and ("Category" in sales_with_cat.columns)
+    has_purchase = (not purchase_with_cat.empty) and purchase_amount_col and ("Category" in purchase_with_cat.columns)
+    if not has_sales and not has_purchase:
+        return
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Category comparison</div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div class='section-copy'>Compare sales and purchases by item category. "
+        f"Uses the mapping in <code>{CATEGORY_MAP_FILE.name}</code> "
+        "(items not in the mapping are shown as <i>Uncategorized</i>). "
+        "Leave the selector empty to see the full distribution, or pick categories to focus the view.</div>",
+        unsafe_allow_html=True,
+    )
+
+    sales_cats = set(sales_with_cat["Category"].dropna().unique()) if has_sales else set()
+    purchase_cats = set(purchase_with_cat["Category"].dropna().unique()) if has_purchase else set()
+    all_cats = sorted(sales_cats | purchase_cats, key=lambda v: str(v))
+
+    selected = st.multiselect(
+        "Filter categories (empty = show all)",
+        options=all_cats,
+        default=[],
+        key="overview_category_filter",
+    )
+
+    if selected:
+        if has_sales:
+            sales_view = sales_with_cat[sales_with_cat["Category"].isin(selected)]
+        else:
+            sales_view = sales_with_cat
+        if has_purchase:
+            purchase_view = purchase_with_cat[purchase_with_cat["Category"].isin(selected)]
+        else:
+            purchase_view = purchase_with_cat
+    else:
+        sales_view = sales_with_cat
+        purchase_view = purchase_with_cat
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if has_sales and not sales_view.empty:
+            cat_sales = sales_view.groupby("Category", dropna=False)[sales_amount_col].sum().reset_index()
+            cat_sales = cat_sales[cat_sales[sales_amount_col] > 0]
+            if not cat_sales.empty:
+                fig = px.pie(cat_sales, names="Category", values=sales_amount_col,
+                             title="% Revenue by Category", hole=0.45)
+                fig.update_traces(textposition="inside", textinfo="percent+label")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No revenue in the selected categories.")
+        else:
+            st.info("Upload sales data to see revenue by category.")
+
+    with col_b:
+        if has_purchase and not purchase_view.empty:
+            cat_purchase = purchase_view.groupby("Category", dropna=False)[purchase_amount_col].sum().reset_index()
+            cat_purchase = cat_purchase[cat_purchase[purchase_amount_col] > 0]
+            if not cat_purchase.empty:
+                fig = px.pie(cat_purchase, names="Category", values=purchase_amount_col,
+                             title="% Spend by Category", hole=0.45)
+                fig.update_traces(textposition="inside", textinfo="percent+label")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No spend in the selected categories.")
+        else:
+            st.info("Upload purchase data to see spend by category.")
+
+    if has_sales or has_purchase:
+        sales_by_cat = (
+            sales_view.groupby("Category", dropna=False)[sales_amount_col].sum().rename("Revenue")
+            if has_sales else pd.Series(dtype=float, name="Revenue")
+        )
+        purchase_by_cat = (
+            purchase_view.groupby("Category", dropna=False)[purchase_amount_col].sum().rename("Spend")
+            if has_purchase else pd.Series(dtype=float, name="Spend")
+        )
+        combined = pd.concat([sales_by_cat, purchase_by_cat], axis=1).fillna(0).reset_index()
+        combined = combined[(combined["Revenue"] > 0) | (combined["Spend"] > 0)]
+        if not combined.empty:
+            combined["Net (Revenue - Spend)"] = combined["Revenue"] - combined["Spend"]
+            combined["_total"] = combined["Revenue"] + combined["Spend"]
+            combined = combined.sort_values("_total", ascending=False)
+
+            if selected:
+                chart_source = combined
+                chart_title = "Revenue vs Spend by Category (₹)"
+            else:
+                top_n = 15
+                chart_source = combined.head(top_n)
+                chart_title = f"Revenue vs Spend by Category (₹) — Top {min(top_n, len(combined))} of {len(combined)}"
+
+            chart_df = chart_source[["Category", "Revenue", "Spend"]].melt(
+                id_vars="Category", var_name="Metric", value_name="Amount"
+            )
+            fig = px.bar(
+                chart_df,
+                x="Category",
+                y="Amount",
+                color="Metric",
+                barmode="group",
+                title=chart_title,
+                color_discrete_map={"Revenue": "#0f766e", "Spend": "#b91c1c"},
+                text="Amount",
+            )
+            fig.update_traces(texttemplate="₹%{text:,.0f}", textposition="outside", cliponaxis=False)
+            fig.update_layout(xaxis_title=None, yaxis_title="Amount (₹)", legend_title_text="")
+            fig.update_xaxes(tickangle=-30, categoryorder="array", categoryarray=chart_source["Category"].tolist())
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("<div class='small-caption'>Revenue vs Spend by category</div>", unsafe_allow_html=True)
+            st.dataframe(combined.drop(columns="_total").reset_index(drop=True), use_container_width=True)
+
 
 def render_sales(sales_df: pd.DataFrame):
     if sales_df.empty:
@@ -320,7 +485,8 @@ def render_sales(sales_df: pd.DataFrame):
         options.append(("Sales person", "Sales person"))
     if "Item Name" in sales_df.columns:
         options.append(("Item name", "Item Name"))
-    options = options or [("Customer", "Customer Name")] if "Customer Name" in sales_df.columns else []
+    if not options and "Customer Name" in sales_df.columns:
+        options = [("Customer", "Customer Name")]
     breakdown_label, breakdown_col = options[0] if options else (None, None)
     if options:
         breakdown_label, breakdown_col = st.selectbox("Explore sales cuts by", options, format_func=lambda x: x[0], index=0)
@@ -389,7 +555,8 @@ def render_purchase(purchase_df: pd.DataFrame):
         options.append(("City", "City"))
     if "Vendor Name" in purchase_df.columns:
         options.append(("Vendor", "Vendor Name"))
-    options = options or [("Invoice", "Invoice #")] if "Invoice #" in purchase_df.columns else []
+    if not options and "Invoice #" in purchase_df.columns:
+        options = [("Invoice", "Invoice #")]
     breakdown_label, breakdown_col = options[0] if options else (None, None)
     if options:
         breakdown_label, breakdown_col = st.selectbox("Explore purchase cuts by", options, format_func=lambda x: x[0], index=0)
