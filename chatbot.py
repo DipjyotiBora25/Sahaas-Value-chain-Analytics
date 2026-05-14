@@ -7,7 +7,7 @@ local Ollama server (default http://localhost:11434).
 
 Setup:
     Install Ollama (https://ollama.com), then in a terminal:
-        ollama pull llama3.2     # or qwen2.5:3b for a lighter model
+        ollama pull llama3.2:3b     # or qwen2.5:3b for a lighter model
 """
 
 from __future__ import annotations
