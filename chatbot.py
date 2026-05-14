@@ -325,7 +325,7 @@ _FLOATING_CSS = """
     /* Pin the LAST popover on the page (our robot) to the bottom-right corner */
     div[data-testid="stPopover"]:last-of-type {
         position: fixed !important;
-        bottom: 24px;
+        bottom: calc(24px + 1cm);
         right: 24px;
         z-index: 9999;
         width: auto !important;
