@@ -13,6 +13,7 @@ st.set_page_config(page_title="Saahas Zero Waste Analytics", page_icon="♻️",
 # Import dashboard modules
 from sales_dashboard import render_revenue_insights
 from purchase_dashboard import render_spend_analysis
+from chatbot import render_floating_chatbot
 
 ROOT = Path(__file__).resolve().parent
 LOGO_FILE = ROOT / "SZW_Logo.png"
@@ -64,31 +65,48 @@ def app_styles():
     st.markdown(
         """
         <style>
-            .page-shell {background:#f8fafc; color:#0f172a;}
-            .header-panel {display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;}
-            .brand-block {display:flex;align-items:center;gap:1rem;}
-            .brand-mark {width:52px;height:52px;border-radius:18px;background:#eaf2ff;display:flex;align-items:center;justify-content:center;font-size:1.5rem;}
-            .brand-title {font-size:2rem;font-weight:800;margin:0;color:#0f172a;line-height:1.1;}
-            .brand-subtitle {margin:0;color:#475569;font-size:1rem;}
-            .meta-block {display:flex;flex-direction:column;gap:0.5rem;align-items:flex-end;}
-            .meta-chip {padding:0.65rem 1rem;border-radius:999px;background:#ffffff;border:1px solid #d1d5db;color:#334155;font-size:0.9rem;}
-            .upload-card {background:white;padding:1.2rem;border-radius:1rem;box-shadow:0 15px 35px rgba(15,23,42,0.08);border:1px solid #e2e8f0;margin-bottom:1.5rem;}
-            .metric-row {display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-bottom:1.5rem;}
-            .metric-card {background:white;padding:1.35rem;border-radius:1rem;box-shadow:0 12px 30px rgba(15,23,42,0.06);border:1px solid #e2e8f0;}
-            .metric-label {font-size:0.78rem;font-weight:700;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:0.75rem;}
-            .metric-value {font-size:2rem;font-weight:800;color:#0f172a;line-height:1;}
-            .metric-delta {margin-top:0.45rem;font-size:0.85rem;font-weight:700;}
+            :root {
+                --fs-3xs: clamp(0.72rem, 0.68rem + 0.18vw, 0.82rem);
+                --fs-2xs: clamp(0.78rem, 0.73rem + 0.22vw, 0.9rem);
+                --fs-xs:  clamp(0.82rem, 0.76rem + 0.28vw, 0.95rem);
+                --fs-sm:  clamp(0.88rem, 0.8rem  + 0.4vw,  1.05rem);
+                --fs-base:clamp(0.95rem, 0.86rem + 0.45vw, 1.15rem);
+                --fs-md:  clamp(1rem,    0.9rem  + 0.55vw, 1.3rem);
+                --fs-lg:  clamp(1.25rem, 1.05rem + 1.05vw, 1.85rem);
+                --fs-xl:  clamp(1.5rem,  1.15rem + 1.75vw, 2.5rem);
+                --fs-2xl: clamp(1.75rem, 1.25rem + 2.4vw,  3rem);
+                --sp-1:   clamp(0.35rem, 0.3rem + 0.2vw, 0.55rem);
+                --sp-2:   clamp(0.55rem, 0.45rem + 0.4vw, 0.85rem);
+                --sp-3:   clamp(0.85rem, 0.7rem + 0.6vw, 1.35rem);
+                --sp-4:   clamp(1.1rem, 0.85rem + 1vw, 1.85rem);
+                --radius-md: clamp(0.75rem, 0.6rem + 0.5vw, 1.15rem);
+                --radius-pill: 999px;
+            }
+            .page-shell {background:#f8fafc; color:#0f172a; font-size:var(--fs-base);}
+            .header-panel {display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-3);margin-bottom:var(--sp-4);flex-wrap:wrap;}
+            .brand-block {display:flex;align-items:center;gap:var(--sp-3);}
+            .brand-mark {width:clamp(40px,2.2rem + 2vw,64px);height:clamp(40px,2.2rem + 2vw,64px);border-radius:var(--radius-md);background:#eaf2ff;display:flex;align-items:center;justify-content:center;font-size:var(--fs-lg);}
+            .brand-title {font-size:var(--fs-2xl);font-weight:800;margin:0;color:#0f172a;line-height:1.1;}
+            .brand-subtitle {margin:0;color:#475569;font-size:var(--fs-sm);}
+            .meta-block {display:flex;flex-direction:column;gap:var(--sp-1);align-items:flex-end;}
+            .meta-chip {padding:var(--sp-2) var(--sp-3);border-radius:var(--radius-pill);background:#ffffff;border:1px solid #d1d5db;color:#334155;font-size:var(--fs-2xs);}
+            .upload-card {background:white;padding:var(--sp-3);border-radius:var(--radius-md);box-shadow:0 15px 35px rgba(15,23,42,0.08);border:1px solid #e2e8f0;margin-bottom:var(--sp-4);}
+            .metric-row {display:grid;grid-template-columns:repeat(auto-fit,minmax(clamp(180px,16vw,260px),1fr));gap:var(--sp-3);margin-bottom:var(--sp-4);}
+            .metric-card {background:white;padding:var(--sp-3);border-radius:var(--radius-md);box-shadow:0 12px 30px rgba(15,23,42,0.06);border:1px solid #e2e8f0;}
+            .metric-label {font-size:var(--fs-3xs);font-weight:700;color:#64748b;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:var(--sp-2);}
+            .metric-value {font-size:var(--fs-xl);font-weight:800;color:#0f172a;line-height:1;}
+            .metric-delta {margin-top:var(--sp-1);font-size:var(--fs-2xs);font-weight:700;}
             .metric-delta.positive {color:#0f766e;}
             .metric-delta.negative {color:#b91c1c;}
-            .section-card {background:white;padding:1.35rem;border-radius:1rem;box-shadow:0 12px 30px rgba(15,23,42,0.06);border:1px solid #e2e8f0;}
-            .section-title {font-size:1rem;font-weight:700;color:#0f172a;margin-bottom:0.75rem;}
-            .section-copy {font-size:0.95rem;color:#475569;margin-bottom:1rem;line-height:1.6;}
-            .chart-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem;}
-            .data-table th{font-weight:700;color:#475569;border-bottom:1px solid #e2e8f0;padding-bottom:0.75rem;text-align:left;font-size:0.84rem;}
-            .data-table td{padding:0.75rem 0;font-size:0.88rem;color:#334155;border-bottom:1px solid #f1f5f9;}
-            .small-caption {font-size:0.85rem;color:#64748b;margin-top:0.45rem;}
-            .tab-guide {display:flex;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;}
-            .tab-pill {padding:0.6rem 1rem;border-radius:999px;background:#f8fafc;border:1px solid #e2e8f0;color:#475569;font-size:0.85rem;}
+            .section-card {background:white;padding:var(--sp-3);border-radius:var(--radius-md);box-shadow:0 12px 30px rgba(15,23,42,0.06);border:1px solid #e2e8f0;}
+            .section-title {font-size:var(--fs-md);font-weight:700;color:#0f172a;margin-bottom:var(--sp-2);}
+            .section-copy {font-size:var(--fs-sm);color:#475569;margin-bottom:var(--sp-3);line-height:1.6;}
+            .chart-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(clamp(260px,24vw,360px),1fr));gap:var(--sp-3);}
+            .data-table th{font-weight:700;color:#475569;border-bottom:1px solid #e2e8f0;padding-bottom:var(--sp-2);text-align:left;font-size:var(--fs-2xs);}
+            .data-table td{padding:var(--sp-2) 0;font-size:var(--fs-xs);color:#334155;border-bottom:1px solid #f1f5f9;}
+            .small-caption {font-size:var(--fs-2xs);color:#64748b;margin-top:var(--sp-1);}
+            .tab-guide {display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-3);}
+            .tab-pill {padding:var(--sp-2) var(--sp-3);border-radius:var(--radius-pill);background:#f8fafc;border:1px solid #e2e8f0;color:#475569;font-size:var(--fs-2xs);}
             .tab-pill.active {background:#e0f2fe;color:#0369a1;border-color:#bae6fd;}
         </style>
         """,
@@ -645,6 +663,8 @@ def main():
         render_spend_analysis(purchase_df)
 
     st.markdown('</div>', unsafe_allow_html=True)
+
+    render_floating_chatbot(sales_df, purchase_df)
 
 
 if __name__ == "__main__":
