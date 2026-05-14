@@ -5,16 +5,21 @@ pulses and shows a "Need help?" nudge after the user has been idle for 60s.
 Clicking opens a popover with a chat interface that streams responses from a
 local Ollama server (default http://localhost:11434).
 
+The app automatically starts Ollama and pulls models on first run — no manual
+setup required. Users just need to have Ollama installed.
+
 Setup:
-    Install Ollama (https://ollama.com), then in a terminal:
-        ollama pull llama3.2     # or qwen2.5:3b for a lighter model
+    Install Ollama from https://ollama.com. The app handles the rest.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import platform
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -89,6 +94,154 @@ def _format_reasoning(text: str) -> str:
     if "<think>" in out and "</think>" not in out:
         out = out.replace("<think>", "_💭 thinking…_\n\n", 1)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Ollama auto-startup and model management
+# ---------------------------------------------------------------------------
+
+def _ollama_installed() -> bool:
+    """Check if ollama command is available on PATH."""
+    try:
+        subprocess.run(["ollama", "--version"], capture_output=True, timeout=5)
+        return True
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _is_ollama_running(host: str) -> bool:
+    """Check if Ollama server is responding."""
+    try:
+        r = requests.get(f"{host.rstrip('/')}/api/tags", timeout=3)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def _start_ollama_server() -> tuple[bool, str]:
+    """Start the Ollama server in the background. Platform-specific."""
+    if _is_ollama_running(DEFAULT_HOST):
+        return True, "Ollama is already running."
+
+    system = platform.system()
+    try:
+        if system == "Darwin":  # macOS
+            # Try to find the Ollama app and launch it
+            app_path = Path("/Applications/Ollama.app/Contents/MacOS/Ollama")
+            if app_path.exists():
+                subprocess.Popen([str(app_path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                time.sleep(3)
+                if _is_ollama_running(DEFAULT_HOST):
+                    return True, "✅ Started Ollama on macOS."
+                return False, "Started Ollama app but server not responding yet."
+            return False, "Ollama app not found in /Applications/Ollama.app"
+
+        elif system == "Windows":
+            # On Windows, Ollama typically installs as a Windows service or standalone app
+            # Try to find it in common locations
+            possible_paths = [
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
+                Path("C:\\") / "Program Files" / "Ollama" / "ollama.exe",
+            ]
+            for exe_path in possible_paths:
+                if exe_path.exists():
+                    subprocess.Popen(
+                        [str(exe_path)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, 'CREATE_NEW_CONSOLE') else 0
+                    )
+                    time.sleep(3)
+                    if _is_ollama_running(DEFAULT_HOST):
+                        return True, "✅ Started Ollama on Windows."
+                    return False, "Started Ollama but server not responding yet."
+            return False, "Ollama executable not found. Please install from https://ollama.com"
+
+        elif system == "Linux":
+            # On Linux, try to start ollama serve in the background
+            try:
+                subprocess.Popen(
+                    ["ollama", "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                time.sleep(3)
+                if _is_ollama_running(DEFAULT_HOST):
+                    return True, "✅ Started Ollama server on Linux."
+                return False, "Started ollama serve but server not responding yet."
+            except FileNotFoundError:
+                return False, "`ollama` command not found. Please install from https://ollama.com"
+
+        return False, f"Unsupported OS: {system}"
+
+    except Exception as e:
+        return False, f"Error starting Ollama: {e}"
+
+
+def _pull_model(model: str, host: str) -> tuple[bool, str]:
+    """Pull a model if it's not already available."""
+    try:
+        available = list_ollama_models(host)
+        if model in available:
+            return True, f"Model `{model}` already available."
+
+        # Run ollama pull in a subprocess to avoid blocking the UI
+        proc = subprocess.run(
+            ["ollama", "pull", model],
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minutes to pull
+        )
+        if proc.returncode == 0:
+            return True, f"✅ Successfully pulled `{model}`."
+        err = (proc.stderr or proc.stdout or "").strip()
+        return False, f"Failed to pull `{model}`:\n{err}"
+    except subprocess.TimeoutExpired:
+        return False, f"Pulling `{model}` timed out (>10 min). Try manually: `ollama pull {model}`"
+    except FileNotFoundError:
+        return False, "`ollama` command not found on PATH."
+    except Exception as e:
+        return False, f"Error pulling model: {e}"
+
+
+@st.cache_resource
+def _ensure_ollama_setup() -> tuple[bool, str, str]:
+    """
+    One-time setup: check/start Ollama, pull a default model.
+    Returns (success, message, model_name).
+    Cached so it only runs once per session.
+    """
+    if not _ollama_installed():
+        return False, (
+            "❌ Ollama not installed.\n\n"
+            "Download from https://ollama.com and restart the app."
+        ), ""
+
+    # Try to start Ollama
+    ok, msg = _start_ollama_server()
+    if not ok and not _is_ollama_running(DEFAULT_HOST):
+        return False, f"❌ {msg}", ""
+
+    # Wait a bit for server to be ready
+    for _ in range(10):
+        if _is_ollama_running(DEFAULT_HOST):
+            break
+        time.sleep(0.5)
+
+    if not _is_ollama_running(DEFAULT_HOST):
+        return False, (
+            "❌ Ollama server not responding.\n\n"
+            "Try manually starting Ollama and then reload the app."
+        ), ""
+
+    # Try to pull the default model
+    model = FALLBACK_MODELS[0]  # llama3.2
+    ok, pull_msg = _pull_model(model, DEFAULT_HOST)
+    if not ok:
+        return False, f"❌ {pull_msg}", ""
+
+    return True, f"✅ Ollama ready with `{model}`.", model
 
 
 # ---------------------------------------------------------------------------
@@ -517,6 +670,13 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
     with st.popover("📎", help="Ask the data assistant"):
         st.markdown("### 📎 Saahas Data Assistant")
         st.caption("Runs locally via Ollama — your data never leaves this machine.")
+
+        # Auto-setup on first load
+        setup_ok, setup_msg, default_model = _ensure_ollama_setup()
+        if not setup_ok:
+            st.error(setup_msg)
+            st.info("⚙️ Manual setup: Install Ollama from https://ollama.com, then reload the app.")
+            return
 
         with st.expander("⚙️ Settings", expanded=False):
             host = st.text_input(
