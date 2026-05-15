@@ -5,22 +5,16 @@ pulses and shows a "Need help?" nudge after the user has been idle for 60s.
 Clicking opens a popover with a chat interface that streams responses from a
 local Ollama server (default http://localhost:11434).
 
-The app automatically starts Ollama and pulls models on first run — no manual
-setup required. Users just need to have Ollama installed.
-
 Setup:
-    Install Ollama from https://ollama.com. The app handles the rest.
+    Install Ollama (https://ollama.com), then in a terminal:
+        ollama pull llama3.2     # or qwen2.5:3b for a lighter model
 """
 
 from __future__ import annotations
 
 import json
-import os
-import platform
 import re
 import subprocess
-import sys
-import time
 from pathlib import Path
 from typing import Iterable
 
@@ -95,187 +89,6 @@ def _format_reasoning(text: str) -> str:
     if "<think>" in out and "</think>" not in out:
         out = out.replace("<think>", "_💭 thinking…_\n\n", 1)
     return out
-
-
-# ---------------------------------------------------------------------------
-# Ollama auto-startup and model management
-# ---------------------------------------------------------------------------
-
-def _ollama_installed() -> bool:
-    """Check if ollama command is available on PATH."""
-    try:
-        subprocess.run(["ollama", "--version"], capture_output=True, timeout=5, check=False)
-        return True
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
-def _is_ollama_running(host: str, timeout: int = 3) -> bool:
-    """Check if Ollama server is responding."""
-    try:
-        r = requests.get(f"{host.rstrip('/')}/api/tags", timeout=timeout)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-def _find_ollama_executable() -> Path | None:
-    """Find Ollama executable in common locations."""
-    system = platform.system()
-    
-    if system == "Darwin":  # macOS
-        paths = [
-            Path("/usr/local/bin/ollama"),
-            Path("/opt/homebrew/bin/ollama"),
-            Path.home() / ".ollama" / "bin" / "ollama",
-        ]
-    elif system == "Windows":
-        paths = [
-            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
-            Path("C:/Program Files/Ollama/ollama.exe"),
-        ]
-    else:  # Linux
-        paths = [
-            Path("/usr/local/bin/ollama"),
-            Path("/usr/bin/ollama"),
-            Path.home() / ".local" / "bin" / "ollama",
-        ]
-    
-    for path in paths:
-        if path.exists():
-            return path
-    return None
-
-
-def _start_ollama_server() -> tuple[bool, str]:
-    """Start the Ollama server in the background. Platform-specific."""
-    if _is_ollama_running(DEFAULT_HOST):
-        return True, "Ollama is already running."
-
-    system = platform.system()
-    ollama_exe = _find_ollama_executable()
-    
-    if not ollama_exe:
-        return False, "Ollama executable not found. Install from https://ollama.com"
-    
-    try:
-        if system == "Darwin":  # macOS
-            # macOS: launch with shell to detach properly
-            subprocess.Popen(
-                [str(ollama_exe), "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid if hasattr(os, 'setsid') else None
-            )
-        elif system == "Windows":
-            # Windows: use CREATE_NEW_CONSOLE flag
-            CREATE_NEW_CONSOLE = 0x00000010
-            subprocess.Popen(
-                [str(ollama_exe), "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=CREATE_NEW_CONSOLE
-            )
-        else:  # Linux
-            # Linux: start new session
-            subprocess.Popen(
-                [str(ollama_exe), "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
-            )
-        
-        # Wait for server to start
-        for attempt in range(30):  # Try for up to 30 seconds
-            time.sleep(1)
-            if _is_ollama_running(DEFAULT_HOST, timeout=2):
-                return True, f"✅ Started Ollama on {system}."
-        
-        return False, "Ollama started but took too long to respond. Please wait and reload."
-    
-    except Exception as e:
-        return False, f"Error starting Ollama: {e}"
-
-
-def _pull_model(model: str, host: str) -> tuple[bool, str]:
-    """Pull a model if it's not already available."""
-    try:
-        # Check if already available
-        try:
-            available = list_ollama_models(host)
-            if model in available:
-                return True, f"Model `{model}` already available."
-        except Exception:
-            pass  # If we can't list, try to pull anyway
-        
-        # Run ollama pull
-        proc = subprocess.run(
-            ["ollama", "pull", model],
-            capture_output=True,
-            text=True,
-            timeout=600  # 10 minutes to pull
-        )
-        
-        if proc.returncode == 0:
-            return True, f"✅ Successfully pulled `{model}`."
-        
-        err = (proc.stderr or proc.stdout or "").strip()
-        if "connection refused" in err.lower() or "cannot connect" in err.lower():
-            return False, "Ollama not running. Please start it manually and reload."
-        return False, f"Failed to pull `{model}`:\n{err}"
-    
-    except subprocess.TimeoutExpired:
-        return False, f"Pulling `{model}` timed out. It may still be downloading — please wait."
-    except FileNotFoundError:
-        return False, "`ollama` command not found on PATH."
-    except Exception as e:
-        return False, f"Error pulling model: {e}"
-
-
-@st.cache_resource
-def _ensure_ollama_setup() -> tuple[bool, str, str]:
-    """
-    One-time setup: check/start Ollama, pull a default model.
-    Returns (success, message, model_name).
-    Cached so it only runs once per session.
-    """
-    if not _ollama_installed():
-        return False, (
-            "❌ **Ollama not installed**\n\n"
-            "1. Download from: https://ollama.com\n"
-            "2. Install and complete setup\n"
-            "3. Reload this app"
-        ), ""
-
-    # Try to start Ollama
-    ok, msg = _start_ollama_server()
-    if not ok:
-        return False, f"❌ {msg}", ""
-
-    # Verify it's actually running
-    if not _is_ollama_running(DEFAULT_HOST, timeout=5):
-        return False, (
-            "❌ **Could not start Ollama server**\n\n"
-            "Try manually:\n"
-            "1. Open Ollama app (or run `ollama serve` in terminal)\n"
-            "2. Wait 5 seconds\n"
-            "3. Reload this page"
-        ), ""
-
-    # Try to pull the default model (non-blocking)
-    model = FALLBACK_MODELS[0]  # llama3.2
-    ok, pull_msg = _pull_model(model, DEFAULT_HOST)
-    
-    if not ok:
-        # If model pull failed, still allow the app to work with manual model selection
-        return False, (
-            f"⚠️ {pull_msg}\n\n"
-            "You can:\n"
-            "- Manually run: `ollama pull llama3.2`\n"
-            "- Or select a different model below"
-        ), ""
-
-    return True, f"✅ Ollama ready with `{model}`.", model
 
 
 # ---------------------------------------------------------------------------
@@ -661,7 +474,7 @@ def _process_query(prompt: str, host: str, model: str, data_context: str) -> str
             "Make sure Ollama is installed and running:\n"
             "1. Install: https://ollama.com\n"
             "2. Run: `ollama serve` (Windows app starts it automatically)\n"
-            "3. Pull a model: `ollama pull llama3.2`"
+            "3. Pull a model: `ollama pull llama3.2:3b`"
         )
         placeholder.error(msg)
         return msg
@@ -705,16 +518,7 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
         st.markdown("### 📎 Saahas Data Assistant")
         st.caption("Runs locally via Ollama — your data never leaves this machine.")
 
-        # Auto-setup on first load
-        setup_ok, setup_msg, default_model = _ensure_ollama_setup()
-        
-        if not setup_ok:
-            st.warning(setup_msg)
-            st.markdown("---")
-        else:
-            st.success(setup_msg)
-
-        with st.expander("⚙️ Settings", expanded=not setup_ok):
+        with st.expander("⚙️ Settings", expanded=False):
             host = st.text_input(
                 "Ollama host",
                 value=st.session_state.get("ollama_host", DEFAULT_HOST),
@@ -729,13 +533,11 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
                 model = st.selectbox("Model", available, index=idx, key="ollama_model_select")
             else:
                 st.warning(
-                    "Ollama unreachable. You can:\n"
-                    "- Open the Ollama app or run `ollama serve`\n"
-                    "- Change the host above if running remotely\n"
-                    "- Type a model name and try to pull it"
+                    "Ollama unreachable. Start it and pull a model "
+                    "(`ollama pull llama3.2`)."
                 )
                 model = st.selectbox(
-                    "Model (manual)",
+                    "Model (typed — not verified)",
                     FALLBACK_MODELS,
                     index=0,
                     key="ollama_model_fallback",
@@ -789,7 +591,7 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
                 st.code(data_context, language="text")
 
         # Suggested prompts as quick buttons
-        if not st.session_state["chat_messages"] and not no_data and setup_ok:
+        if not st.session_state["chat_messages"] and not no_data:
             st.markdown("**Try asking:**")
             suggestions = [
                 "Summarize the key revenue and spend numbers.",
@@ -817,29 +619,27 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
 
         # Input form (more reliable inside a popover than st.chat_input)
         prompt = st.session_state.pop("_pending_prompt", None)
-        
-        if setup_ok:
-            with st.form(key="chatbot_form", clear_on_submit=True):
-                typed = st.text_input(
-                    "Question",
-                    placeholder="Ask about revenue, vendors, categories, trends…",
-                    label_visibility="collapsed",
-                    key="chatbot_input",
-                )
-                submitted = st.form_submit_button("Send", use_container_width=True)
-            if submitted and typed and typed.strip():
-                prompt = typed.strip()
+        with st.form(key="chatbot_form", clear_on_submit=True):
+            typed = st.text_input(
+                "Question",
+                placeholder="Ask about revenue, vendors, categories, trends…",
+                label_visibility="collapsed",
+                key="chatbot_input",
+            )
+            submitted = st.form_submit_button("Send", use_container_width=True)
+        if submitted and typed and typed.strip():
+            prompt = typed.strip()
 
-            if prompt:
-                st.session_state["chat_messages"].append({"role": "user", "content": prompt})
-                with msg_box:
-                    with st.chat_message("user"):
-                        st.markdown(prompt)
-                    with st.chat_message("assistant"):
-                        reply = _process_query(
-                            prompt,
-                            st.session_state["ollama_host"],
-                            st.session_state["ollama_model"],
-                            data_context,
-                        )
-                st.session_state["chat_messages"].append({"role": "assistant", "content": reply})
+        if prompt:
+            st.session_state["chat_messages"].append({"role": "user", "content": prompt})
+            with msg_box:
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+                with st.chat_message("assistant"):
+                    reply = _process_query(
+                        prompt,
+                        st.session_state["ollama_host"],
+                        st.session_state["ollama_model"],
+                        data_context,
+                    )
+            st.session_state["chat_messages"].append({"role": "assistant", "content": reply})
