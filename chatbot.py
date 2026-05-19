@@ -27,7 +27,16 @@ import streamlit.components.v1 as components
 MODELFILE_PATH = Path(__file__).resolve().parent / "Modelfile.saahas-analyst"
 CUSTOM_MODEL_NAME = "saahas-analyst"
 
-DEFAULT_HOST = os.getenv("OLLAMA_API_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434"))
+
+def get_default_host() -> str:
+    """Return the configured Ollama host, preferring Streamlit secrets first."""
+    host = os.getenv("OLLAMA_API_URL") or os.getenv("OLLAMA_HOST")
+    try:
+        host = st.secrets.get("OLLAMA_API_URL", host)
+    except Exception:
+        pass
+    return (host or "http://localhost:11434").rstrip("/")
+
 FALLBACK_MODELS = ["llama3.2", "qwen2.5:3b", "phi3", "mistral", "gemma2:2b"]
 IDLE_MS = 60_000
 
@@ -535,9 +544,10 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
         st.caption("Runs locally via Ollama — your data never leaves this machine.")
 
         with st.expander("⚙️ Settings", expanded=False):
+            default_host = st.session_state.get("ollama_host", get_default_host())
             host = st.text_input(
                 "Ollama host",
-                value=st.session_state.get("ollama_host", DEFAULT_HOST),
+                value=default_host,
                 key="ollama_host_input",
             )
             st.session_state["ollama_host"] = host
@@ -550,11 +560,12 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
             else:
                 st.warning(
                     "Ollama is unreachable at the configured host. "
-                    "Start the Ollama server and pull a model before using the assistant."
+                    "For cloud deployment, set `OLLAMA_API_URL` to an external Ollama server and ensure the model is pulled there."
                 )
                 st.markdown(
-                    "- Run `ollama serve` to start the local server.\n"
-                    "- Run `ollama pull llama3.2` (or another model name).",
+                    "- If you are running locally, start Ollama: `ollama serve`.\n"
+                    "- If you are hosting remotely, point `OLLAMA_API_URL` to your remote Ollama server and pre-pull the model there.\n"
+                    "- Example: `ollama pull llama3.2` on the remote host.",
                     unsafe_allow_html=False,
                 )
                 model = st.selectbox(
@@ -563,8 +574,24 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
                     index=0,
                     key="ollama_model_fallback",
                 )
-                if st.button("Refresh available models", use_container_width=True):
+
+            verify_col, refresh_col = st.columns([3, 1])
+            with verify_col:
+                if st.button("Verify Ollama host", use_container_width=True):
+                    verified = list_ollama_models(host)
+                    if verified:
+                        st.success(
+                            f"✅ Ollama is reachable at {host}. {len(verified)} model(s) available."
+                        )
+                    else:
+                        st.error(
+                            f"❌ Could not contact Ollama at {host}. "
+                            "For cloud hosting, set `OLLAMA_API_URL` to your remote Ollama server and make sure the model is pulled there."
+                        )
+            with refresh_col:
+                if st.button("Refresh models", use_container_width=True):
                     st.experimental_rerun()
+
             st.session_state["ollama_model"] = model
 
             show_ctx = _safe_toggle(
