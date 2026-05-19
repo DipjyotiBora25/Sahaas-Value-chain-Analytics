@@ -27,6 +27,24 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+## Performance tuning (local Ollama)
+
+For low-latency chatbot responses when using a local Ollama server, use the included startup script to tune VRAM and caching before running the app:
+
+```bash
+./start_ollama.sh   # macOS / zsh
+# or on Windows PowerShell: start_ollama.ps1
+```
+
+Environment toggles (optional):
+- `OLLAMA_KV_CACHE_TYPE=q8_0` — quantized KV cache to reduce VRAM use
+- `OLLAMA_NUM_PARALLEL=1` — dedicate parallelism to single requests
+- `OLLAMA_PRELOAD_MODEL=1` — warm model on client init
+- `OLLAMA_RESPONSE_CACHE=1` — enable local disk response cache (default)
+- `OLLAMA_RESPONSE_CACHE_TTL` — cache TTL in seconds (default `3600`)
+
+These optimizations reduce cold-start latency and repeated identical prompt overhead.
+
 ## Notes
 - Sales data is loaded automatically from the desktop folder `Working_sales Sahaas` when available.
 - Purchase data is loaded automatically from the desktop folder `Working_Purchase Sahaas` when available.

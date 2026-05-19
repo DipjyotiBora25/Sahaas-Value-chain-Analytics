@@ -13,6 +13,7 @@ Setup:
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -26,9 +27,21 @@ import streamlit.components.v1 as components
 MODELFILE_PATH = Path(__file__).resolve().parent / "Modelfile.saahas-analyst"
 CUSTOM_MODEL_NAME = "saahas-analyst"
 
-DEFAULT_HOST = "http://localhost:11434"
+DEFAULT_HOST = os.getenv("OLLAMA_API_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434"))
 FALLBACK_MODELS = ["llama3.2", "qwen2.5:3b", "phi3", "mistral", "gemma2:2b"]
 IDLE_MS = 60_000
+
+
+def _safe_popover(label: str, help: str | None = None):
+    if hasattr(st, "popover"):
+        return st.popover(label, help=help)
+    return st.expander(label, expanded=False)
+
+
+def _safe_toggle(label: str, value: bool = False, key: str | None = None) -> bool:
+    if hasattr(st, "toggle"):
+        return st.toggle(label, value=value, key=key)
+    return st.checkbox(label, value=value, key=key)
 
 # ── Performance tuning sent with every chat request ───────────────────────
 # keep_alive holds the model resident on GPU between turns, killing the
@@ -96,6 +109,9 @@ def _format_reasoning(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def list_ollama_models(host: str) -> list[str]:
+    host = (host or "").strip()
+    if not host:
+        return []
     try:
         r = requests.get(f"{host.rstrip('/')}/api/tags", timeout=3)
         r.raise_for_status()
@@ -514,7 +530,7 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
         purchase_df is None or purchase_df.empty
     )
 
-    with st.popover("📎", help="Ask the data assistant"):
+    with _safe_popover("📎", help="Ask the data assistant"):
         st.markdown("### 📎 Saahas Data Assistant")
         st.caption("Runs locally via Ollama — your data never leaves this machine.")
 
@@ -533,8 +549,13 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
                 model = st.selectbox("Model", available, index=idx, key="ollama_model_select")
             else:
                 st.warning(
-                    "Ollama unreachable. Start it and pull a model "
-                    "(`ollama pull llama3.2`)."
+                    "Ollama is unreachable at the configured host. "
+                    "Start the Ollama server and pull a model before using the assistant."
+                )
+                st.markdown(
+                    "- Run `ollama serve` to start the local server.\n"
+                    "- Run `ollama pull llama3.2` (or another model name).",
+                    unsafe_allow_html=False,
                 )
                 model = st.selectbox(
                     "Model (typed — not verified)",
@@ -542,7 +563,15 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
                     index=0,
                     key="ollama_model_fallback",
                 )
+                if st.button("Refresh available models", use_container_width=True):
+                    st.experimental_rerun()
             st.session_state["ollama_model"] = model
+
+            show_ctx = _safe_toggle(
+                "Show data context",
+                value=st.session_state.get("show_ctx", False),
+                key="show_ctx",
+            )
 
             col_a, col_b = st.columns(2)
             with col_a:
@@ -555,11 +584,6 @@ def render_floating_chatbot(sales_df: pd.DataFrame, purchase_df: pd.DataFrame) -
                     with st.spinner(f"Loading {model}…"):
                         ok, msg = warm_up_model(host, model)
                     (st.success if ok else st.error)(msg)
-
-            show_ctx = st.toggle(
-                "Show data context", value=st.session_state.get("show_ctx", False)
-            )
-            st.session_state["show_ctx"] = show_ctx
 
             st.markdown("---")
             st.markdown("**📦 Specialized Saahas analyst model**")

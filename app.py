@@ -664,7 +664,11 @@ def main():
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    render_floating_chatbot(sales_df, purchase_df)
+    try:
+        render_floating_chatbot(sales_df, purchase_df)
+    except Exception as e:
+        st.error("The data assistant failed to load. Please ensure Ollama is running or use the dashboard without the chatbot.")
+        st.write(f"Error details: {e}")
 
 
 if __name__ == "__main__":

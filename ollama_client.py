@@ -9,6 +9,15 @@ import requests
 import streamlit as st
 from typing import Optional, Generator
 from dotenv import load_dotenv
+from pathlib import Path
+import hashlib
+import json
+import time
+
+# Simple disk cache for responses to avoid repeated generation for identical prompts
+CACHE_DIR = Path(".ollama_cache")
+CACHE_TTL = int(os.getenv("OLLAMA_RESPONSE_CACHE_TTL", "3600"))  # seconds
+CACHE_ENABLED = os.getenv("OLLAMA_RESPONSE_CACHE", "1") not in ("0", "false", "False")
 
 # Load environment variables from .env file (local development)
 load_dotenv()
@@ -180,7 +189,22 @@ class OllamaClient:
 @st.cache_resource
 def get_ollama_client() -> OllamaClient:
     """Get or create global Ollama client instance."""
-    return OllamaClient()
+    client = OllamaClient()
+
+    # Optionally preload/warm the model to reduce first-request latency
+    try:
+        preload = os.getenv("OLLAMA_PRELOAD_MODEL", "1") not in ("0", "false", "False")
+        if preload and client.is_available:
+            # Run a lightweight warm-up request (no user-visible side effects)
+            try:
+                client.generate("Hello. Warm-up.", model=client.model, stream=False)
+            except Exception:
+                # ignore warmup failures
+                pass
+    except Exception:
+        pass
+
+    return client
 
 
 def query_ollama_with_context(
@@ -214,4 +238,33 @@ def query_ollama_with_context(
     
     full_prompt += f"User: {prompt}"
     
-    return client.generate(full_prompt)
+    # Check cache first (only for non-streaming requests)
+    cache_key = None
+    if CACHE_ENABLED:
+        try:
+            digest = hashlib.sha256()
+            digest.update((full_prompt + "::" + (client.model or "")).encode("utf-8"))
+            cache_key = digest.hexdigest()
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_file = CACHE_DIR / f"{cache_key}.json"
+            if cache_file.exists():
+                with cache_file.open("r", encoding="utf-8") as fh:
+                    entry = json.load(fh)
+                # Validate TTL
+                if time.time() - float(entry.get("ts", 0)) < CACHE_TTL:
+                    return entry.get("response")
+        except Exception:
+            cache_key = None
+
+    response = client.generate(full_prompt)
+
+    # Save to cache
+    if CACHE_ENABLED and cache_key and response is not None:
+        try:
+            cache_file = CACHE_DIR / f"{cache_key}.json"
+            with cache_file.open("w", encoding="utf-8") as fh:
+                json.dump({"ts": time.time(), "response": response}, fh)
+        except Exception:
+            pass
+
+    return response
